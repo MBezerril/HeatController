@@ -1,5 +1,5 @@
 #include <DHT.h>
-#include "U8glib.h"
+#include <Adafruit_SSD1306.h>
 
 #define coolerFan 3
 #define resistencePin 4
@@ -7,14 +7,16 @@
 #define pinButtonDownTemp 10
 #define pinButtonPower 11
 #define DHT11PIN 7
+#define DHTTYPE DHT11
 
-int led = HIGH;
+bool dhtActivated = false;
 bool isActivated = false;
 volatile int targetTemperature = 30;
-int actualTemperature = 0;
+float actualTemperature = 0;
 long contador = 0;
 volatile uint8_t portbHistory = 0xFF; // padrão é alto por causa do pull-up
-U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NO_ACK);  // Display which does not send AC
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+DHT dht(DHT11PIN, DHTTYPE);
 
 void setup() {
   cli();//stop interrupts
@@ -43,38 +45,55 @@ void setup() {
   Serial.begin(9600);
   pinMode(coolerFan, OUTPUT);
   pinMode(resistencePin, OUTPUT);
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  // Clear the buffer.
+  display.clearDisplay();
+  // Display Text "Hello Word"
+  display.clearDisplay();
+  dht.begin();
+  dhtActivated = true;
   contador = millis();
   Serial.println("START");
 }
 
 void loop() {
   if(millis() - contador >250){
+    float h = dht.readHumidity();
+    actualTemperature = dht.readTemperature();
     contador = millis();
-    Serial.print("Temp Target: ");
-    Serial.println(targetTemperature);
-    u8g.firstPage();  
-    do
-    {
-      draw();
-    } while( u8g.nextPage() );
+    Serial.print("Temp: ");
+    Serial.println(actualTemperature, BIN);
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0,0);
+    String tempTarget = String(targetTemperature, DEC);
+    if(isActivated){
+      tempTarget += "/";
+      tempTarget += String(actualTemperature, 2);
+    }
+    tempTarget += "C";
+    display.println(tempTarget);
+    display.display();
   }
 }
 
 ISR(TIMER1_COMPA_vect){
-  led = led == LOW ? HIGH : LOW;
-  digitalWrite(coolerFan, led);
-  if (isActivated) {
-    if (actualTemperature < targetTemperature) {
-      digitalWrite(coolerFan, LOW); //desliga o cooler
-      digitalWrite(resistencePin, HIGH); //aciona a resistencia de aquecimento
-    } else if (actualTemperature > targetTemperature) {
-      digitalWrite(coolerFan, HIGH); //liga o cooler
-      digitalWrite(resistencePin, LOW); //desliga a resistencia de aquecimento
-    } else {
-      digitalWrite(coolerFan, LOW); //desliga o cooler
-      digitalWrite(resistencePin, LOW); //desliga a resistencia de aquecimento
+    //Thermistor analog reading
+    if (isActivated) {
+      if (actualTemperature < targetTemperature) {
+        digitalWrite(coolerFan, LOW); //desliga o cooler
+        digitalWrite(resistencePin, HIGH); //aciona a resistencia de aquecimento
+      } else if (actualTemperature > targetTemperature) {
+        digitalWrite(coolerFan, HIGH); //liga o cooler
+        digitalWrite(resistencePin, LOW); //desliga a resistencia de aquecimento
+      } else {
+        digitalWrite(coolerFan, LOW); //desliga o cooler
+        digitalWrite(resistencePin, LOW); //desliga a resistencia de aquecimento
+      }
+    }else{
+      
     }
-  }
 }
 
 ISR(PCINT0_vect) {
@@ -97,27 +116,4 @@ ISR(PCINT0_vect) {
   if (changedbits & (1 << PINB2)) {
     targetTemperature--;
   }
-}
-
-void draw() 
-{
-  //Comandos graficos para o display devem ser colocados aqui
-  //Seleciona a fonte de texto
-  u8g.setFont(u8g_font_8x13B);
-  //Linha superior - temperatura 
-  String tempTarget = String(targetTemperature, DEC);
-  if(isActivated){
-    tempTarget += "/";
-    tempTarget += String(actualTemperature, DEC);
-  }
-  tempTarget += "C";
-  u8g.drawStr( 5, 15, tempTarget.c_str());
-  //Hora
-  u8g.setFont(u8g_font_fub30);
-  u8g.drawStr( 10, 57, "09:35");
-  //Texto - AM
-  u8g.setFont(u8g_font_5x7);
-  u8g.drawStr( 115, 33, "AM");
-  //moldura relogio
-  u8g.drawRFrame(0,18, 128, 46, 4);
 }
